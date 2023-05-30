@@ -35,11 +35,11 @@ wandb.init(
     "dataset": "1d-gp",
     "epochs": 10000,
     },
-    name="1d-gp-fixed-phi-100-centers"
+    name="1d-gp-fixed-phi-full-batch"
 )
 
 class GP1D(Dataset):
-    def __init__(self, dataPoints=100, samples=10000, ingrid=True, x_lim = 1,
+    def __init__(self, dataPoints=100, samples=10000, ingrid=True, x_lim = 3,
                         seed=np.random.randint(20), kernel='rbf',ls = 0.1, nu=2.5):
         self.dataPoints = dataPoints
         self.samples = samples
@@ -308,7 +308,7 @@ gp = GaussianProcessRegressor(kernel=RBF(length_scale=0.1))
 
 y_inf = gp.sample_y(x_inf[:, np.newaxis]).reshape(-1)
 
-idx = (x_inf>=-2) * (x_inf<=2)
+idx = (x_inf>=-2.9) * (x_inf<=2.9)
 ll_idx = np.where(idx)
 fig = plt.figure()
 ax = fig.add_subplot(111)
@@ -327,9 +327,9 @@ def train_piVAE():
     # Just showing how to use piVAE to learn priors
 
     ###### intializing data and model parameters
-    n_samples = 1000
+    n_samples = 100
     in_features = 1
-    n_evals = 1000
+    n_evals = 100
     n_centers = math.ceil(n_evals/2)
     alpha = 1.0
     dim1 = 20
@@ -338,11 +338,11 @@ def train_piVAE():
     hidden_dims2 = 8
     z_dim = 5
     out_dims = 100
-    batch_size = 5
+    batch_size = 100
 
     ###### creating data, model and optimizer
     train_ds = GP1D(dataPoints=n_evals, samples=n_samples, ls=0.1)
-    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=True)
+    train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=False)
     
     val_ds = GP1D(dataPoints=n_evals, samples=n_samples, ls=0.1)
     val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
@@ -356,7 +356,7 @@ def train_piVAE():
     # device = 'cpu'
     model = model.to(device)
     
-    epochs = 10000
+    epochs = 100000
     print(device)
     ###### running for 10000 epochs
     t = trange(epochs)

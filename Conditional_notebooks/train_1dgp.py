@@ -32,20 +32,15 @@ wandb.init(
     # track hyperparameters and run metadata
     config={
     "learning_rate": 0.00003,
-    "dataset": "2-parameter-sinosoid",
-    "epochs": 5000,
+    "dataset": "1d-gp",
+    "epochs": 10000,
     },
-    name="variable-sinusoid-fixed-phi-full-batch"
+    name="1d-gp-full-batch"
 )
 
-def parameterized_sin(x,a=1,b=2,c=3):
-    b = np.random.normal(0, 1)
-    c = np.random.normal(0, 1)
-    return a*np.sin(b*x+c) + 0.1*np.random.normal(0, 1, size=x.shape)
-
-class Sin1D(Dataset):
-    def __init__(self, dataPoints=100, samples=10000, ingrid=False, x_lim = 3,
-                        seed=np.random.randint(20),ls = 0.1, nu=2.5):
+class GP1D(Dataset):
+    def __init__(self, dataPoints=100, samples=10000, ingrid=True, x_lim = 3,
+                        seed=np.random.randint(20), kernel='rbf',ls = 0.1, nu=2.5):
         self.dataPoints = dataPoints
         self.samples = samples
         self.ingrid = ingrid
@@ -54,6 +49,7 @@ class Sin1D(Dataset):
         self.Max_Points = 2 * dataPoints
         self.ls = ls
         self.nu = nu
+        self.kernel = kernel
         np.random.seed(self.seed)
         self.evalPoints, self.data = self.__simulatedata__()
     
@@ -65,10 +61,15 @@ class Sin1D(Dataset):
 
 
     def __simulatedata__(self):
-        
+        if self.kernel=='rbf':
+            gp = GaussianProcessRegressor(kernel=RBF(length_scale=self.ls))
+        elif self.kernel=='matern':
+            gp = GaussianProcessRegressor(kernel=Matern(length_scale=self.ls, nu=self.nu))
+        else:
+            return None
         if (self.ingrid):
             X_ = np.linspace(-self.x_lim, self.x_lim, self.dataPoints)
-            y_samples = parameterized_sin(X_.repeat(self.samples).reshape(X_.shape[0],self.samples))
+            y_samples = gp.sample_y(X_[:, np.newaxis], self.samples)
             # print(X_.shape, y_samples.shape)
             return (X_.repeat(self.samples).reshape(X_.shape[0],self.samples) ,
                         y_samples)
@@ -79,12 +80,12 @@ class Sin1D(Dataset):
             y_samples = np.zeros((self.dataPoints,self.samples))
             for idx in range(self.samples):
                 x_ = X_[:,idx]
-                y_samples[:,idx] =  parameterized_sin(x_[:]).reshape(self.dataPoints,)
+                y_samples[:,idx] = gp.sample_y(x_[:, np.newaxis]).reshape(self.dataPoints,)
             # print(X_.shape, y_samples.shape)
             return (X_, y_samples)
         
-def visualize_1D_sin():
-    dataset =Sin1D(dataPoints=100, samples=10000, ls=0.1, x_lim=3)
+def visualize_1D_gp():
+    dataset =GP1D(dataPoints=100, samples=10000, ls=0.1, x_lim=3)
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
     fig = plt.figure()
     ax = fig.add_subplot(111)
@@ -94,11 +95,11 @@ def visualize_1D_sin():
     ax.set_xlabel('$x$')
     ax.set_ylabel('$y=f(x)$')
     ax.set_title('10 different function realizations at fixed 100 points\n'
-    'sampled from differently parameterized sin(ax+b) functions')
+    'sampled from a Gaussian process with RBF')
 #     fig_image = wandb.Image(fig)
     wandb.log({"data visualization": fig})
 
-visualize_1D_sin()
+visualize_1D_gp()
 
 class PHI(nn.Module):
     '''
@@ -141,15 +142,12 @@ class PHI(nn.Module):
        # self.alpha = Parameter(torch.tensor(alpha)) # create a tensor out of alpha
         #self.alpha.requiresGrad = True # set requiresGrad to true!
         # centers
-        
-        n_centers = out_dims
-        
         self.centers = Parameter(torch.randn(n_centers, in_features)) # create a tensor out of centers
-        self.centers.requiresGrad = False # set requiresGrad to false!, so fixed centres chosen randomly
+        self.centers.requiresGrad = True # set requiresGrad to true!
         # linear layers
-#         self.linear1 = nn.Linear(n_centers, hidden_dim1)
-#         self.linear2 = nn.Linear(hidden_dim1, hidden_dim2)
-#         self.out = nn.Linear(n_centers, out_dims)
+        self.linear1 = nn.Linear(n_centers, hidden_dim1)
+        self.linear2 = nn.Linear(hidden_dim1, hidden_dim2)
+        self.out = nn.Linear(hidden_dim2, out_dims)
 
     def forward(self, x):
         '''
@@ -157,10 +155,9 @@ class PHI(nn.Module):
         Applies the function to the input elementwise.
         '''
         rbf = torch.exp(-1 * torch.cdist(x, self.centers).pow(2))
-#         hidden1 = torch.tanh(self.linear1(rbf))
-#         hidden2 = torch.tanh(self.linear2(hidden1))
-#         out = self.out(rbf)
-        out = rbf
+        hidden1 = torch.tanh(self.linear1(rbf))
+        hidden2 = torch.tanh(self.linear2(hidden1))
+        out = self.out(hidden2)
         return out
 
 class Encoder(nn.Module):
@@ -302,19 +299,18 @@ def calculate_loss(target, reconstructed1, reconstructed2, mean, log_var):
     return RCL + KLD
 
 # sampling points to evaluate functions values
-x_inf = np.linspace(-3.5,3.5,100).reshape(-1,1)
-e_n = 0.1 * np.random.randn(100).reshape(-1,1)
 
-a=1
-b = np.random.normal(0, 1)
-c = np.random.normal(0, 1)
-y_ = a*np.sin(b*x_inf+c)
-y_inf = y_ + e_n
-idx = (x_inf>=-3) * (x_inf<=3)
+x_inf = np.linspace(-3,3,100)
+
+gp = GaussianProcessRegressor(kernel=RBF(length_scale=0.1))
+
+y_inf = gp.sample_y(x_inf[:, np.newaxis]).reshape(-1)
+
+idx = (x_inf>=-2.9) * (x_inf<=2.9)
 ll_idx = np.where(idx)
 fig = plt.figure()
 ax = fig.add_subplot(111)
-ax.plot(x_inf, y_, color='blue', alpha=0.5)
+ax.plot(x_inf, y_inf, color='blue', alpha=0.5)
 ax.scatter(x_inf[ll_idx], y_inf[ll_idx], marker='+', color='red', alpha=0.5, s=100)
 ax.set_xlabel('$x$')
 ax.set_ylabel('$y=f(x)$')
@@ -340,13 +336,13 @@ def train_piVAE():
     hidden_dims2 = 8
     z_dim = 5
     out_dims = 100
-    batch_size = 100
+    batch_size = n_evals
 
     ###### creating data, model and optimizer
-    train_ds = Sin1D(dataPoints=n_evals, samples=n_samples, ls=0.1)
+    train_ds = GP1D(dataPoints=n_evals, samples=n_samples, ls=0.1)
     train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=False)
     
-    val_ds = Sin1D(dataPoints=n_evals, samples=n_samples)
+    val_ds = GP1D(dataPoints=n_evals, samples=n_samples, ls=0.1)
     val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
     
     model = PIVAE(in_features=in_features, alpha=alpha, n_centers=n_centers,
@@ -358,9 +354,9 @@ def train_piVAE():
     # device = 'cpu'
     model = model.to(device)
     
-    epochs = 5000
+    epochs = 100000
     print(device)
-    ###### running for 5000 epochs
+    ###### running for 10000 epochs
     t = trange(epochs)
     for e in t:
         # set training mode
@@ -382,7 +378,7 @@ def train_piVAE():
                  'W3': vae_decoder.out.weight.T.cpu().detach().numpy(),
                  'B3': vae_decoder.out.bias.T.cpu().detach().numpy(),
                  'beta_dim' : out_dims,
-                 'phi_x' : phi(torch.tensor(x_inf).float().to(device)).cpu().detach().numpy(),
+                 'phi_x' : phi(torch.tensor(x_inf.reshape(-1,1)).float().to(device)).cpu().detach().numpy(),
                  'y': y_inf.reshape(100,),
                  'll_len' : ll_idx[0].shape[0],
                  'll_idxs' : ll_idx[0]}
@@ -402,14 +398,14 @@ def train_piVAE():
             datapoints = x_inf
             fig = plt.figure()
             ax = fig.add_subplot(111)
-            ax.plot(datapoints, y_, color='black', label='True')
+            ax.plot(datapoints, y_inf, color='black', label='True')
             ax.scatter(datapoints[ll_idx], y_inf[ll_idx], s=46,label = 'Observations')
             ax.fill_between(datapoints.reshape(datapoints.shape[0]), df.quantile(0.025).to_numpy(), df.quantile(0.975).to_numpy(),
                                 facecolor="blue",
                                 color='blue', 
                                 alpha=0.2, label = '95% Credible Interval') 
             ax.plot(datapoints, df.mean().to_numpy().reshape(-1,1), color='red', alpha=0.7, label = 'Posterior mean')
-            plt.xlim(-10, 10)
+            plt.xlim(-3, 3)
             plt.ylim(-2, 2)
             ax.set_xlabel('$x$')
             ax.set_ylabel('$y=f(x)$')
@@ -433,7 +429,7 @@ def train_piVAE():
             ax.plot(datapoints, df3_2.reshape(-1,1), alpha=0.7, label = 'Posterior 3')
             ax.plot(datapoints, df3_3.reshape(-1,1), alpha=0.7, label = 'Posterior 4')
             ax.plot(datapoints, df3_4.reshape(-1,1), alpha=0.7, label = 'Posterior 5')
-            plt.xlim(-2, 2)
+            plt.xlim(-3, 3)
             plt.ylim(-2, 2)
             ax.set_xlabel('$x$')
             ax.set_ylabel('$y=f(x)$')
@@ -470,11 +466,11 @@ def train_piVAE():
             total_val_loss += loss.item() 
         loss_logging_val = total_val_loss/(n_evals*n_samples)
         wandb.log({"val_loss": loss_logging_val})
-        t.set_description(f'Val Loss is {total_loss/(n_evals*n_samples):.3}')
+        t.set_description(f'Val Loss is {total_val_loss/(n_evals*n_samples):.3}')
         
     
     return model
 
 model = train_piVAE()
 
-pickle.dump(model, open("variable-sinusoid-model-fixed-center.pkl", "wb") )
+pickle.dump(model, open("1d-gp-model-new.pkl", "wb") )

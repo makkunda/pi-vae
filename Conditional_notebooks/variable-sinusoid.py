@@ -35,7 +35,7 @@ wandb.init(
     "dataset": "2-parameter-sinosoid",
     "epochs": 5000,
     },
-    name="variable-sinusoid-fixed-phi-full-batch"
+    name="variable-sinusoid-full-batch"
 )
 
 def parameterized_sin(x,a=1,b=2,c=3):
@@ -141,15 +141,12 @@ class PHI(nn.Module):
        # self.alpha = Parameter(torch.tensor(alpha)) # create a tensor out of alpha
         #self.alpha.requiresGrad = True # set requiresGrad to true!
         # centers
-        
-        n_centers = out_dims
-        
         self.centers = Parameter(torch.randn(n_centers, in_features)) # create a tensor out of centers
-        self.centers.requiresGrad = False # set requiresGrad to false!, so fixed centres chosen randomly
+        self.centers.requiresGrad = True # set requiresGrad to true!
         # linear layers
-#         self.linear1 = nn.Linear(n_centers, hidden_dim1)
-#         self.linear2 = nn.Linear(hidden_dim1, hidden_dim2)
-#         self.out = nn.Linear(n_centers, out_dims)
+        self.linear1 = nn.Linear(n_centers, hidden_dim1)
+        self.linear2 = nn.Linear(hidden_dim1, hidden_dim2)
+        self.out = nn.Linear(hidden_dim2, out_dims)
 
     def forward(self, x):
         '''
@@ -157,10 +154,9 @@ class PHI(nn.Module):
         Applies the function to the input elementwise.
         '''
         rbf = torch.exp(-1 * torch.cdist(x, self.centers).pow(2))
-#         hidden1 = torch.tanh(self.linear1(rbf))
-#         hidden2 = torch.tanh(self.linear2(hidden1))
-#         out = self.out(rbf)
-        out = rbf
+        hidden1 = torch.tanh(self.linear1(rbf))
+        hidden2 = torch.tanh(self.linear2(hidden1))
+        out = self.out(hidden2)
         return out
 
 class Encoder(nn.Module):
@@ -339,14 +335,14 @@ def train_piVAE():
     hidden_dims1 = 16
     hidden_dims2 = 8
     z_dim = 5
-    out_dims = 100
-    batch_size = 100
+    out_dims = n_evals
+    batch_size = n_evals
 
     ###### creating data, model and optimizer
     train_ds = Sin1D(dataPoints=n_evals, samples=n_samples, ls=0.1)
     train_dl = DataLoader(train_ds, batch_size=batch_size, shuffle=False)
     
-    val_ds = Sin1D(dataPoints=n_evals, samples=n_samples)
+    val_ds = Sin1D(dataPoints=n_evals, samples=n_samples, ls=0.1)
     val_dl = DataLoader(val_ds, batch_size=batch_size, shuffle=False)
     
     model = PIVAE(in_features=in_features, alpha=alpha, n_centers=n_centers,
@@ -358,7 +354,7 @@ def train_piVAE():
     # device = 'cpu'
     model = model.to(device)
     
-    epochs = 5000
+    epochs = 100000
     print(device)
     ###### running for 5000 epochs
     t = trange(epochs)
@@ -470,11 +466,11 @@ def train_piVAE():
             total_val_loss += loss.item() 
         loss_logging_val = total_val_loss/(n_evals*n_samples)
         wandb.log({"val_loss": loss_logging_val})
-        t.set_description(f'Val Loss is {total_loss/(n_evals*n_samples):.3}')
+        t.set_description(f'Val Loss is {total_val_loss/(n_evals*n_samples):.3}')
         
     
     return model
 
 model = train_piVAE()
 
-pickle.dump(model, open("variable-sinusoid-model-fixed-center.pkl", "wb") )
+pickle.dump(model, open("variable-sinusoid-model-1.pkl", "wb") )

@@ -25,6 +25,10 @@ import math
 
 import wandb
 
+# for debugging
+
+import ipdb
+
 wandb.init(
     # set the wandb project where this run will be logged
     project="pi-vae",
@@ -35,7 +39,7 @@ wandb.init(
     "dataset": "2-parameter-sinosoid",
     "epochs": 5000,
     },
-    name="variable-sinusoid-fixed-phi-full-batch"
+    name="variable-sinusoid-fixed-phi-full-batch-debugging"
 )
 
 def parameterized_sin(x,a=1,b=2,c=3):
@@ -289,8 +293,9 @@ class PIVAE(nn.Module):
         beta = torch.stack([self.betas[i].weight for i in range(self.batch_size)
                             ]).flatten(0,1)
         beta_vae = self.vae(beta)
-        y2 = torch.stack([phi_x[i]@beta_vae[0][i] + self.betas[i].bias for i in 
+        y2 = torch.stack([phi_x[i]@beta_vae[0]beta_vae[0][i] + self.betas[i].bias for i in 
                             range(self.batch_size)])
+        ipdb.set_trace()
         return y1, y2, beta_vae[1], beta_vae[2]
     
 def calculate_loss(target, reconstructed1, reconstructed2, mean, log_var):
@@ -329,9 +334,9 @@ def train_piVAE():
     # Just showing how to use piVAE to learn priors
 
     ###### intializing data and model parameters
-    n_samples = 100
+    n_samples = 109
     in_features = 1
-    n_evals = 100
+    n_evals = 103
     n_centers = math.ceil(n_evals/2)
     alpha = 1.0
     dim1 = 20
@@ -339,8 +344,8 @@ def train_piVAE():
     hidden_dims1 = 16
     hidden_dims2 = 8
     z_dim = 5
-    out_dims = 100
-    batch_size = 100
+    out_dims = 104
+    batch_size = 97
 
     ###### creating data, model and optimizer
     train_ds = Sin1D(dataPoints=n_evals, samples=n_samples, ls=0.1)

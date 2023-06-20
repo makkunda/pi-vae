@@ -2,8 +2,8 @@ functions {
   vector layer(vector x, matrix W, vector B) {
     return(transpose(transpose(x) * W) + B);
   }
-  vector generator_stan(vector input1,vector input2, matrix W1, matrix W2, matrix W3, vector B1, vector B2, vector B3) {
-    return(layer(tanh(layer(tanh(layer(append_col(input1,input2),W1,B1)),W2,B2)),W3,B3));
+  vector generator_stan(vector input1,real input2, matrix W1, matrix W2, matrix W3, vector B1, vector B2, vector B3) {
+    return(layer(tanh(layer(tanh(layer(append_row(input1,input2),W1,B1)),W2,B2)),W3,B3));
   }
 }
 data {
@@ -21,13 +21,13 @@ data {
   
   
   matrix[n,beta_dim] phi_x; // values of loaction after going through phi
-  vector[n] c;
   vector[n] y;
   int ll_len;                    // length of indices for likelihood
   int ll_idxs[ll_len];           // indices for likelihood
 }
 parameters {
   vector[p] z;
+  real c;
   real<lower=0> sigma2;
 }
 transformed parameters {
@@ -37,6 +37,7 @@ transformed parameters {
   y_hat = phi_x * f;
 }
 model {
+  c ~ normal(0,1);
   z ~ normal(0,1);
   sigma2 ~ normal(0,10);
   y[ll_idxs] ~ normal(y_hat[ll_idxs],sigma2);
